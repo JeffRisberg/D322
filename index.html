@@ -1,0 +1,234 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+        "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+  <title>D3 22</title>
+  <meta http-equiv="content-type" content="text/html; charset=UTF-8">
+  <script type="text/javascript" src="js/d3.js"></script>
+  <script type="text/javascript" src="js/jquery-1.11.0.min.js"></script>
+  
+  <style type='text/css'>
+	.chart {
+	  margin-left: 42px;
+	  font: 10px sans-serif;
+	  shape-rendering: crispEdges;
+	}
+	
+	.chart {
+	  background-color: #fff;
+	  text-align: right;
+	  padding: 3px;
+	  margin: 1px;
+	  color: white;
+	}
+	
+	rect.bordered {
+	  stroke: #E6E6E6;
+	  stroke-width:2px;   
+	}
+	
+	text.mono {
+	  font-size: 9pt;
+	  font-family: Consolas, courier;
+	  fill: #aaa;
+	}
+	
+	text.axis-label {
+	  fill: #000;
+	}
+	
+	text.axis-trackDate {
+	  fill: #000;
+	}
+</style>
+</head>
+<body>
+
+<div id="header">
+  Group by
+ <select id="groupBy">
+   <option selected value="player">Players</option>
+   <option value="team">Teams</option>
+   <option value="activity">Activities</option>
+ </select>
+</div>
+<div id="chart">
+</div>
+
+<script type="text/javascript"> 
+$(document).ready(function() {
+  	
+  var eventList = [],
+      fieldName = "player",
+      gridSize = 33,
+      legendElementWidth = gridSize*2,
+      buckets = 9,
+      colors = ["#ffffd9","#edf8b1","#c7e9b4","#7fcdbb","#41b6c4","#1d91c0","#225ea8","#253494","#081d58"];
+  
+  d3.json("caevents.json", function(error, data) {    
+    eventList = data;
+    
+    if (eventList.length > 0) {	    
+	   	render(eventList, fieldName);    	    	   
+    }
+  });
+  
+  $("#groupBy").on("change", function(e) {	  
+	  fieldName = $('#groupBy').val();
+	   
+	  if (eventList.length > 0) {     
+		  render(eventList, fieldName);               
+		}
+	});
+	   
+  /**
+   * Remove any prior heatmap, and render a new one plus a legend.
+   */
+  function render(eventList, fieldName) {
+	  var maxTrackDate = Math.max.apply(null,
+	            $.map(eventList, function(d) { return d.trackDate; }) );  
+	  
+    var tileRows = buildRows(eventList, fieldName);
+    
+    var maxLabelWidth = Math.max.apply(null,
+      $.map(tileRows, function(d) { return d.labelWidth; }));        
+              
+    var tileCells = buildCells(tileRows);
+    
+    var maxScore = Math.max.apply(null,
+      $.map(tileCells, function(d) { return d.score; }) );        
+     
+    var margin = { top: 20, right: 0, bottom: 20, left: 10 + maxLabelWidth },
+      width = 1100 - margin.left - margin.right,
+      height = (tileRows.length+1) * gridSize;    
+    
+    var colorScale = d3.scale.quantile()
+      .domain([0, buckets - 1, maxScore])
+      .range(colors);
+    
+    $("#chart").empty();
+    
+    var svg = d3.select("#chart").append("svg")
+      .attr("width", width + margin.left + margin.right)
+      .attr("height", height + margin.top + margin.bottom)
+      .append("g")
+      .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+    var rowLabels = svg.selectAll(".axis-Label")
+      .data(tileRows)
+      .enter().append("text")
+        .text(function(d) { return d.label; })
+        .attr("x", 0)
+        .attr("y", function(d, i) { return i * gridSize; })
+        .style("text-anchor", "end")
+        .attr("transform", "translate(-6," + gridSize / 1.5 + ")")
+        .attr("class", "axisLabel mono axis");
+
+    var colLabels = svg.selectAll(".axis-TrackDate")
+      .data(Array.apply(null, Array(maxTrackDate+1)).map(function (_, i) {return i;}))
+      .enter().append("text")
+        .text(function(d, i) { return "" + (i+1) })
+        .attr("x", function(d, i) { return i * gridSize; })
+        .attr("y", 0)
+        .style("text-anchor", "middle")
+        .attr("transform", "translate(" + gridSize / 2 + ", -6)")
+        .attr("class", "timeLabel mono axis");
+
+    var heatMap = svg.selectAll("div")
+      .data(tileCells, function(d) { return d.col + ':' + d.row; })
+      .enter().append("svg:rect")
+        .attr("x", function(d) { return d.col * gridSize; })
+        .attr("y", function(d) { return d.row * gridSize; })         
+        .attr("class", "bordered")
+        .attr("width", function(d) { return gridSize; })
+        .attr("height", function(d) { return gridSize; })
+        .style("fill", function(d) { return colors[0]; });
+    
+    heatMap.transition().duration(1000)
+      .style("fill", function(d) { return colorScale(d.score); }); 
+    
+    var legend = svg.selectAll(".legend")
+		  .data([0].concat(colorScale.quantiles()), function(d) { return d; })
+		    .enter().append("g")
+		    .attr("class", "legend");
+		
+		legend.append("rect")
+		  .attr("x", function(d, i) { return legendElementWidth * i; })
+		  .attr("y", height)
+		  .attr("width", legendElementWidth)
+		  .attr("height", gridSize / 2)
+		  .style("fill", function(d, i) { return colors[i]; });
+		
+		legend.append("text")
+		  .attr("class", "mono")
+		  .text(function(d) { return "≥ " + Math.round(d); })
+		  .attr("x", function(d, i) { return legendElementWidth * i; })
+		  .attr("y", height - 5);
+	}
+  
+  /**
+   * Determine the text width of a string, based on a font spec such as "13px Arial"
+   */
+  $.fn.textWidth = function(text, font) {
+	    if (!$.fn.textWidth.fakeEl) $.fn.textWidth.fakeEl = $('<span>').hide().appendTo(document.body);
+	    $.fn.textWidth.fakeEl.text(text || this.val() || this.text()).css('font', font || this.css('font'));
+	    return $.fn.textWidth.fakeEl.width();
+	};
+	
+  /**
+   * Group the events into rows by specified field
+   */
+  function buildRows(eventList, fieldName) {
+    var rows = [];
+
+    var maxTrackDate = Math.max.apply(null,
+            $.map(eventList, function(d) { return d.trackDate; }) );         
+    
+    eventList.forEach(function(node) {       	
+      var row = null;
+      rows.forEach(function(r) {
+         if (r.label == node[fieldName]) {
+           row = r;
+         }
+      });
+      
+      if (row == null) {
+    	  var label = node[fieldName];
+    	  var labelWidth = $.fn.textWidth(label, "13pt Arial");
+    	  var cells = {};    	 
+    	  for (var i = 0; i < maxTrackDate; i++) { cells[i] = 0; }    
+    	      	  
+        row = {label: label, labelWidth: labelWidth, color: "white", stroke: "black", cells: cells};
+        
+        rows.push(row);
+      }
+           
+      var date = node.trackDate;
+      var priorSum = row.cells[date]
+      if (priorSum == null) priorSum = 0.0;
+      
+      row.cells[date] = priorSum + node.score;       
+    });
+
+    return rows;
+  }
+  
+  /**
+   * Compile the rows into a cell data list
+   */
+  function buildCells(rows) {    
+    var result = []        
+    $.each(rows, function(i, r) {     
+      for (var key in r.cells) {
+        if (r.cells.hasOwnProperty(key)) {              
+          cellInfo = { row: i, col: key, score: r.cells[key] };
+          result.push(cellInfo);
+        }
+      }     
+    });
+    return result;
+  }
+});
+</script>
+</body>
+</html>
